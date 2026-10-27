@@ -1,0 +1,25 @@
+#!/bin/sh
+# Runs at boot before the VyOS config is applied.
+# Docker disables IPv6 per interface (VyOS needs link-local addresses) and
+# assigns its own IPv4 addresses; undo both so VyOS owns the interfaces.
+for path in /sys/class/net/eth*; do
+    ifname=${path##*/}
+    sysctl -qw net.ipv6.conf.$ifname.disable_ipv6=0
+    ip -4 addr flush dev $ifname
+done
+
+# On a fresh config volume only (so saved changes persist; `make wipe-<gw>`
+# resets the volume): seed the lab config if one is mounted, otherwise just set
+# host-name to the container's hostname. VyOS can't change the hostname Docker
+# sets, so a mismatch makes sudo warn "unable to resolve host".
+config=/opt/vyatta/etc/config/config.boot
+seed=/opt/vyatta/etc/config.boot.lab
+marker=/opt/vyatta/etc/config/.lab-seeded
+if [ ! -e "$marker" ]; then
+    if [ -f "$seed" ]; then
+        cp "$seed" "$config"
+    else
+        sed -i "s/^\(    host-name \)\"vyos\"$/\1\"$(hostname)\"/" "$config"
+    fi
+    touch "$marker"
+fi

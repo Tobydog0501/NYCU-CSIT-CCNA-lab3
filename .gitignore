@@ -1,0 +1,3 @@
+# VyOS ISO, extracted rootfs, dnsmasq leases/logs (created by make)
+*.zip
+build/

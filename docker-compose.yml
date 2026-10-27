@@ -1,0 +1,124 @@
+name: ccna-lab
+
+# Topology:
+#   home-pc --[home-lan]-- home-gw --[transit]-- office-gw --[office-lan]-- office-pc
+#
+#   transit     192.168.1.0/24   gateway .254 = Docker host (br-transit), runs
+#                                DHCP .100-.200 via `make dhcp-up`; gw eth0
+#   home-lan    172.20.21.0/24   gateway .254 (home-gw eth1, not preconfigured)
+#   office-lan  172.20.22.0/24   gateway .254 (office-gw eth1, DHCP .100-.200)
+#
+# Only transit has a way out (host NAT). The LAN bridges have no host IPv4
+# address and no NAT, so .254 is free for the routers. Docker-assigned container IPs
+# are flushed at startup; addressing is done inside the lab.
+
+x-lan-opts: &lan-opts
+  driver: bridge
+  # Not `internal: true`: Docker then drops packets whose src/dst is outside
+  # the subnet, which breaks DHCP and routing between sites. Instead the host
+  # bridge gets no IP and no NAT, so there is still no way out.
+  driver_opts:
+    com.docker.network.bridge.inhibit_ipv4: "true"
+    com.docker.network.bridge.enable_ip_masquerade: "false"
+
+networks:
+  home-lan:
+    <<: *lan-opts
+    ipam:
+      config:
+        - subnet: 172.20.21.0/24
+          gateway: 172.20.21.254
+
+  transit:
+    driver: bridge
+    # The host is the "ISP": it masquerades 192.168.1.0/24 to the internet.
+    # LAN subnets only get out if their router NATs them (see Makefile dhcp-up).
+    driver_opts:
+      com.docker.network.bridge.name: br-transit
+    ipam:
+      config:
+        - subnet: 192.168.1.0/24
+          gateway: 192.168.1.254
+
+  office-lan:
+    <<: *lan-opts
+    ipam:
+      config:
+        - subnet: 172.20.22.0/24
+          gateway: 172.20.22.254
+
+x-vyos: &vyos
+  image: vyos:rolling
+  privileged: true
+  command: /sbin/init
+  sysctls:
+    net.ipv6.conf.all.disable_ipv6: 0
+  tmpfs:
+    - /run
+    - /tmp
+
+x-debian: &debian
+  build: ./debian
+  image: ccna-lab-debian
+  cap_add:
+    - NET_ADMIN
+
+services:
+  home-gw:
+    <<: *vyos
+    container_name: home-gw
+    hostname: home-gw
+    volumes:
+      - /lib/modules:/lib/modules:ro
+      - home-gw-config:/opt/vyatta/etc/config
+      - ./vyos/preconfig-bootup.script:/opt/vyatta/etc/config/scripts/vyos-preconfig-bootup.script:ro
+    networks:
+      transit:
+        interface_name: eth0
+      home-lan:
+        interface_name: eth1
+
+  office-gw:
+    <<: *vyos
+    container_name: office-gw
+    hostname: office-gw
+    volumes:
+      - /lib/modules:/lib/modules:ro
+      - office-gw-config:/opt/vyatta/etc/config
+      - ./vyos/preconfig-bootup.script:/opt/vyatta/etc/config/scripts/vyos-preconfig-bootup.script:ro
+      - ./vyos/office-gw/config.boot:/opt/vyatta/etc/config.boot.lab:ro
+    networks:
+      transit:
+        interface_name: eth0
+      office-lan:
+        interface_name: eth1
+
+  home-pc:
+    <<: *debian
+    container_name: home-pc
+    hostname: home-pc
+    # SSH target for the point-to-site VPN; nothing here persists
+    command: sh -c 'ip -4 addr flush dev eth0; ssh-keygen -A; mkdir -p /run/sshd; /usr/sbin/sshd; exec sleep infinity'
+    networks:
+      home-lan:
+        interface_name: eth0
+
+  office-pc:
+    <<: *debian
+    container_name: office-pc
+    hostname: office-pc
+    command: sh -c 'ip -4 addr flush dev eth0; dhclient -nw eth0; exec sleep infinity'
+    sysctls:
+      # wg-quick sets this for a full-tunnel peer and can't from inside a container
+      net.ipv4.conf.all.src_valid_mark: 1
+    volumes:
+      - office-pc-wireguard:/etc/wireguard
+    networks:
+      office-lan:
+        interface_name: eth0
+
+# Persistent state; wipe with `make wipe-<name>` / `make wipe`
+volumes:
+  home-gw-config:
+  office-gw-config:
+  office-pc-wireguard:
