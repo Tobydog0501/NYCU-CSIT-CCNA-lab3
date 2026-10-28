@@ -41,7 +41,7 @@ On both routers, **eth0 = transit (WAN)** and **eth1 = LAN**.
 ## Requirements
 
 - Debian/Ubuntu-based Linux host with **Docker Engine 28.1+ and Docker Compose 2.36+**. `make up` checks this for you.
-- `sudo`. It's used to build the VyOS image, to run the transit DHCP server, and to add one firewall rule.
+- `sudo`. Every `docker` call made by the Makefile and scripts runs as `sudo docker`, so your account doesn't need to be in the `docker` group. sudo is also used to build the VyOS image, to run the transit DHCP server, and to add one firewall rule.
 - Packages: `squashfs-tools`, `7zip` or `libarchive-tools`, and `dnsmasq-base`
 
 ```bash
@@ -54,7 +54,7 @@ If your Docker is too old (distro packages usually are), upgrade it to Docker's 
 make install-docker      # runs: sudo sh ./scripts/install-docker.sh
 ```
 
-The script removes the distro's Docker packages (`docker.io` etc.) and installs `docker-ce` and `docker-compose-plugin` from download.docker.com. Your existing images, containers and volumes are kept. It also adds you to the `docker` group, so log out and back in afterwards if `docker` then asks for permissions.
+The script removes the distro's Docker packages (`docker.io` etc.) and installs `docker-ce` and `docker-compose-plugin` from download.docker.com. Your existing images, containers and volumes are kept. It also adds you to the `docker` group, but the lab doesn't need that because the Makefile uses `sudo docker`.
 
 ## Quick start
 
@@ -103,6 +103,22 @@ To see the example config, run `show configuration commands` on office-gw, or re
 5. **Verify:** from office-pc, run `ssh ccna@<home-pc IP>` through the tunnel.
 
 Remember to `save` on the VyOS routers, or your config is lost when the container restarts.
+
+### Check your work
+
+```bash
+make test
+```
+
+`make test` runs `scripts/check.sh`, which checks the following and shows PASS/FAIL with a hint for each one:
+
+1. office-pc can ping `192.168.1.254`
+2. home-gw can ping `192.168.1.254`
+3. home-pc can ping home-gw (`172.20.21.254`)
+4. home-pc can ping `192.168.1.254`. This only works through NAT on home-gw.
+5. office-pc reaches home-gw and home-pc over WireGuard: the tunnel is up, the handshake completes, traffic to home-pc is routed through the tunnel, ping works, and SSH (port 22) is reachable.
+
+Addresses are read from the running containers, so any valid addressing you choose for the tunnel passes.
 
 ## Resetting
 
@@ -159,6 +175,7 @@ traceroute 1.1.1.1
 
 - **VyOS image:** VyOS has no official Docker image. `make up` downloads the latest rolling ISO from [vyos-nightly-build](https://github.com/vyos/vyos-nightly-build/releases), extracts its root filesystem and imports it as `vyos:rolling`. To use a specific version, run `make up ISO_URL=<url>`.
 - **Router boot:** `vyos/preconfig-bootup.script` runs before VyOS loads its config. It does three things:
+  - installs `vyos/dhcp-default-route.hook` as a DHCP client hook. On some hosts VyOS (FRR) fails to install the DHCP default route; the hook then adds it directly (metric 210)
   - turns IPv6 back on per interface (Docker disables it, and VyOS needs it to commit any interface config)
   - removes the IPv4 addresses Docker assigned, so VyOS controls all addressing
   - when a config volume is brand new, copies in office-gw's example config, or sets home-gw's hostname
@@ -170,8 +187,10 @@ traceroute 1.1.1.1
 ```
 Makefile                      build, start/stop, shells, reset
 scripts/install-docker.sh     install/upgrade Docker Engine + Compose
+scripts/check.sh              lab checker (make test)
 docker-compose.yml            networks, containers, volumes
 debian/Dockerfile             PC image (net tools, WireGuard, SSH, ccna user)
 vyos/preconfig-bootup.script  router boot fixups and config seeding
+vyos/dhcp-default-route.hook  fallback DHCP default route for the routers
 vyos/office-gw/config.boot    office-gw example config
 ```

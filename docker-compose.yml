@@ -72,6 +72,7 @@ services:
       - /lib/modules:/lib/modules:ro
       - home-gw-config:/opt/vyatta/etc/config
       - ./vyos/preconfig-bootup.script:/opt/vyatta/etc/config/scripts/vyos-preconfig-bootup.script:ro
+      - ./vyos/dhcp-default-route.hook:/opt/vyatta/etc/dhcp-default-route.hook:ro
     networks:
       transit:
         interface_name: eth0
@@ -86,6 +87,7 @@ services:
       - /lib/modules:/lib/modules:ro
       - office-gw-config:/opt/vyatta/etc/config
       - ./vyos/preconfig-bootup.script:/opt/vyatta/etc/config/scripts/vyos-preconfig-bootup.script:ro
+      - ./vyos/dhcp-default-route.hook:/opt/vyatta/etc/dhcp-default-route.hook:ro
       - ./vyos/office-gw/config.boot:/opt/vyatta/etc/config.boot.lab:ro
     networks:
       transit:

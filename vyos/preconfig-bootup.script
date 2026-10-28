@@ -8,6 +8,11 @@ for path in /sys/class/net/eth*; do
     ip -4 addr flush dev $ifname
 done
 
+# Fallback for hosts where FRR fails to install the DHCP default route.
+# Copied (not mounted) because /config is a non-recursive bind of this dir.
+install -D -m 0755 /opt/vyatta/etc/dhcp-default-route.hook \
+    /opt/vyatta/etc/config/scripts/dhcp-client/post-hooks.d/50-default-route
+
 # On a fresh config volume only (so saved changes persist; `make wipe-<gw>`
 # resets the volume): seed the lab config if one is mounted, otherwise just set
 # host-name to the container's hostname. VyOS can't change the hostname Docker

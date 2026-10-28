@@ -1,3 +1,5 @@
+# Students' accounts aren't in the docker group, so every docker call uses sudo
+DOCKER     := sudo docker
 VYOS_IMAGE := vyos:rolling
 BUILD_DIR  := build
 ISO        := $(BUILD_DIR)/vyos.iso
@@ -19,7 +21,7 @@ DNSMASQ_ARGS := --port=0 --interface=$(TRANSIT_BR) --bind-interfaces --user=root
 ISO_URL ?= $(shell curl -fsSL https://api.github.com/repos/vyos/vyos-nightly-build/releases/latest \
 	| grep -o '"browser_download_url": *"[^"]*generic-amd64\.iso"' | head -n1 | cut -d'"' -f4)
 
-.PHONY: help up down restart ps logs iso vyos-image check-tools check-docker install-docker \
+.PHONY: help up down restart ps logs test iso vyos-image check-tools check-docker install-docker \
 	clean distclean dhcp-up dhcp-down \
 	wipe wipe-home-gw wipe-office-gw wipe-office-pc \
 	home-gw office-gw home-pc office-pc
@@ -29,6 +31,7 @@ help:
 	@echo "make up          build images (if needed) and start the lab"
 	@echo "make down        stop and remove the lab"
 	@echo "make ps|logs     status / logs"
+	@echo "make test        check NAT, DHCP and WireGuard"
 	@echo "make dhcp-up|dhcp-down  start/stop the transit DHCP server on the host (part of up/down)"
 	@echo "make home-gw     VyOS shell (vbash) on home-gw"
 	@echo "make office-gw   VyOS shell (vbash) on office-gw"
@@ -42,11 +45,11 @@ help:
 	@echo "make distclean   clean + remove saved configs and the $(VYOS_IMAGE) image"
 
 up: check-docker vyos-image
-	docker compose up -d --build
+	$(DOCKER) compose up -d --build
 	$(MAKE) --no-print-directory dhcp-up
 
 down: dhcp-down
-	docker compose down
+	$(DOCKER) compose down
 
 # --- Docker version ---------------------------------------------------------
 # `interface_name` (fixed NIC order on the routers) needs Engine 28.1+ / Compose 2.36+
@@ -55,8 +58,8 @@ MIN_ENGINE  := 28.1
 MIN_COMPOSE := 2.36
 
 check-docker:
-	@engine=$$(docker version --format '{{.Server.Version}}' 2>/dev/null); \
-	compose=$$(docker compose version --short 2>/dev/null | sed 's/^v//'); \
+	@engine=$$($(DOCKER) version --format '{{.Server.Version}}' 2>/dev/null); \
+	compose=$$($(DOCKER) compose version --short 2>/dev/null | sed 's/^v//'); \
 	ok=1; \
 	[ -n "$$engine" ] && [ "$$(printf '%s\n' $(MIN_ENGINE) "$$engine" | sort -V | head -n1)" = $(MIN_ENGINE) ] || ok=0; \
 	[ -n "$$compose" ] && [ "$$(printf '%s\n' $(MIN_COMPOSE) "$$compose" | sort -V | head -n1)" = $(MIN_COMPOSE) ] || ok=0; \
@@ -86,18 +89,21 @@ dhcp-down:
 restart: down up
 
 ps:
-	docker compose ps
+	$(DOCKER) compose ps
 
 logs:
-	docker compose logs -f
+	$(DOCKER) compose logs -f
+
+test:
+	@bash scripts/check.sh
 
 # --- shells ---------------------------------------------------------------
 
 home-gw office-gw:
-	docker exec -it $@ su - vyos
+	$(DOCKER) exec -it $@ su - vyos
 
 home-pc office-pc:
-	docker exec -it $@ bash
+	$(DOCKER) exec -it $@ bash
 
 # --- VyOS image from ISO --------------------------------------------------
 
@@ -115,7 +121,7 @@ $(ISO):
 iso: $(ISO)
 
 vyos-image: check-tools
-	@if docker image inspect $(VYOS_IMAGE) >/dev/null 2>&1; then \
+	@if $(DOCKER) image inspect $(VYOS_IMAGE) >/dev/null 2>&1; then \
 		echo "$(VYOS_IMAGE) already exists"; \
 	else \
 		$(MAKE) --no-print-directory $(ISO) && \
@@ -127,7 +133,7 @@ vyos-image: check-tools
 		fi && \
 		sudo rm -rf $(ROOTFS) && \
 		sudo unsquashfs -f -d $(ROOTFS) $(BUILD_DIR)/filesystem.squashfs && \
-		sudo tar -C $(ROOTFS) -c . | docker import - $(VYOS_IMAGE) && \
+		sudo tar -C $(ROOTFS) -c . | $(DOCKER) import - $(VYOS_IMAGE) && \
 		sudo rm -rf $(ROOTFS); \
 	fi
 
@@ -140,9 +146,9 @@ wipe-office-gw:   VOLUME := office-gw-config
 wipe-office-pc:   VOLUME := office-pc-wireguard
 
 wipe-home-gw wipe-office-gw wipe-office-pc:
-	docker compose rm -sf $(@:wipe-%=%)
-	-docker volume rm ccna-lab_$(VOLUME)
-	@if docker compose ps -q | grep -q .; then docker compose up -d $(@:wipe-%=%); fi
+	$(DOCKER) compose rm -sf $(@:wipe-%=%)
+	-$(DOCKER) volume rm ccna-lab_$(VOLUME)
+	@if $(DOCKER) compose ps -q | grep -q .; then $(DOCKER) compose up -d $(@:wipe-%=%); fi
 
 wipe: wipe-home-gw wipe-office-gw wipe-office-pc
 
@@ -152,5 +158,5 @@ clean: down
 	sudo rm -rf $(BUILD_DIR)
 
 distclean: clean
-	docker compose down -v
-	-docker image rm $(VYOS_IMAGE)
+	$(DOCKER) compose down -v
+	-$(DOCKER) image rm $(VYOS_IMAGE)

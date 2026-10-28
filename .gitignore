@@ -1,3 +1,6 @@
 # VyOS ISO, extracted rootfs, dnsmasq leases/logs (created by make)
 *.zip
 build/
+
+# TA answer key: auto-configures the home side + WireGuard
+cheat.sh

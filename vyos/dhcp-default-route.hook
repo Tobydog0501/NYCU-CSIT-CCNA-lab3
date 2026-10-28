@@ -1,0 +1,18 @@
+# VyOS dhclient post-hook (sourced by dhclient-script).
+# VyOS installs the DHCP default route through FRR; on some hosts that never
+# reaches the kernel. If the kernel has no default route after a lease, add
+# one via the DHCP gateway. Metric 210 keeps FRR's own route (metric 20)
+# preferred wherever it works. `ip` is a VyOS wrapper here, so use the binary.
+
+case "$reason" in
+    BOUND|RENEW|REBIND|REBOOT)
+        router=${new_routers%% *}
+        if [ -n "$router" ] && [ -z "$(/usr/sbin/ip -4 route show default)" ]; then
+            /usr/sbin/ip -4 route replace default via "$router" dev "$interface" proto dhcp metric 210
+        fi
+        ;;
+    EXPIRE|FAIL|RELEASE|STOP)
+        /usr/sbin/ip -4 route del default dev "$interface" proto dhcp metric 210 2>/dev/null
+        ;;
+esac
+true
