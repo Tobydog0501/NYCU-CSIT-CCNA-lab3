@@ -8,6 +8,17 @@ for path in /sys/class/net/eth*; do
     ip -4 addr flush dev $ifname
 done
 
+# nftables `destroy` needs host kernel 6.3+; on older kernels every interface
+# commit fails ("Could not process rule: Invalid argument"). Rewrite it with
+# add + delete (same effect: remove if present). The rpfilter_strict map's
+# elements always map to `accept`.
+tmpl=/usr/share/vyos/templates/firewall/nftables-source-validation.j2
+sed -i \
+    -e 's/^destroy rule /delete rule /' \
+    -e 's/^destroy element \(.*\) rpfilter_strict { \(.*\) }$/add element \1 rpfilter_strict { \2 : accept }\ndelete element \1 rpfilter_strict { \2 }/' \
+    -e 's/^destroy element \(.*\) { \(.*\) }$/add element \1 { \2 }\ndelete element \1 { \2 }/' \
+    "$tmpl"
+
 # Fallback for hosts where FRR fails to install the DHCP default route.
 # Copied (not mounted) because /config is a non-recursive bind of this dir.
 install -D -m 0755 /opt/vyatta/etc/dhcp-default-route.hook \
